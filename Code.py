@@ -98,14 +98,16 @@ def prime_factorise(val):
         # print(prime_factor)
 
         # Calculate the power factor
+        prev_power = 0
         prev_power_factor = 1
         power_factor = prime_factor
         while n % power_factor == 0:
+            prev_power += 1
             prev_power_factor = power_factor
             power_factor *= prime_factor
         
         # Amend the list of power factors
-        factors.append(prev_power_factor)
+        factors.append((prime_factor, prev_power))
         n = n // prev_power_factor
 
         # print(factors)
@@ -122,7 +124,7 @@ def shank_discrete_log(p, g, A, cardinality):
     if cardinality == 2:
         if A == 1:
             return 0
-        if A == g:
+        else:
             return 1
 
     m = math.ceil(math.sqrt(cardinality))
@@ -168,24 +170,51 @@ def ElGamalDecrypt(p, a, y1, y2):
 
 def DiscreteLog(p, g, A):
 
-    # Use Pholig Hellman to split it into several smaller discrete log instances
+    # Use Silver-Pholig-Hellman to split it into several smaller discrete log instances
     factors = prime_factorise(p-1)
 
     print(factors)
 
+    # The final result of the discrete log
     res = 0
 
-    for factor in factors:
-        power = (p-1) // factor
+    for factor, order in factors:
 
-        inverse = extended_euclidean(power, factor)[1] % factor
+        # These change according to the order of the iteration
+        power = (p-1)
+        factor_power = 1
 
-        # Use Shank's algorithm to solve the smaller instances
-        instance_result = shank_discrete_log(p, repeated_squaring(g, power, p), repeated_squaring(A, power, p), factor)
+        # The generators are constant so they are pre-computed
+        generator = repeated_squaring(g, power // factor, p)
+        generator_inverse = extended_euclidean(g, p)[1] % p
+
+        # The value being logged at each iteration
+        beta = A
+
+        # The instance result being built as powers are lifted
+        factor_res = 0
+
+        # Iteratively raise the order of the factor until the full power factor is considered
+        for i in range(order):
+            # Update the current power
+            power = power // factor
+
+            # Initialise the beta
+            instance_beta = repeated_squaring(beta, power, p)
+
+            # Solve the smaller discrete log instance
+            coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+            # print(coefficient)
+            coefficient_result = coefficient * factor_power
+
+            # Update variables
+            factor_res += coefficient_result
+            factor_power *= factor
+            beta *= repeated_squaring(generator_inverse, coefficient_result, p)
 
         # Combine the results by the Chinese remainder theorem
-        res = (res + (power * inverse * instance_result)) % (p-1)
-    
+        inverse = extended_euclidean(power, factor_power)[1] % factor_power
+        res = (res + (power * inverse * factor_res)) % (p-1)
 
     return res
 
@@ -213,10 +242,39 @@ def ElGamalCrack(p, g, A, y1, y2):
 # print(primality_test(35, 4))
 # print(prime_factorise(756329432))
 
-g = 7
-a = 8
-p = 23
-A = repeated_squaring(g,a,p)
+def find_generator(p):
+    factors = prime_factorise(p-1)
+    found = True
 
-# print(shank_discrete_log(p,g,A))
+    for i in range(1, p):
+
+        for factor, order in factors:
+            power = (p-1) // factor
+            if repeated_squaring(i, power, p) == 1:
+                found = False
+                break
+        
+        if found:
+            return i
+        else:
+            found = True
+    return False
+
+
+
+g = 12
+a = 20089
+p = 104729
+A = repeated_squaring(g,a,p)
+# print(A)
+# A = 75812
+
+# g = 3
+# a = 11
+# p = 17
+# A = repeated_squaring(g,a,p)
+
+# print(find_generator(p))
+
+# print(shank_discrete_log(p,g,A,p))
 print(DiscreteLog(p, g, A))
