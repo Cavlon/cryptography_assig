@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import time
 
 def repeated_squaring(generator, target_exponent, modulo):
     current_exponentiation = generator
@@ -28,7 +29,6 @@ def extended_euclidean(a, b, s1 = 1, s2 = 0, t1 = 0, t2 = 1):
 
 # Miller-Rabin Primality test from Wikipedia
 def primality_test(n, k):
-    # print(n)
 
     if n < 4:
         return n == 2 or n == 3
@@ -40,8 +40,6 @@ def primality_test(n, k):
     while (d % 2 == 0):
         d = d >> 1
         s += 1
-    
-    # print(d, s)
     
     for i in range(k):
         a = np.random.randint(2, n-1)
@@ -59,27 +57,47 @@ def primality_test(n, k):
 def rho_function(val):
     return val * val + 1
 
-# Possibly use Brent's algorithm instead
-def pollard_rho_factorise(n, x0):
-
-    if n % 2 == 0:
-        return 2
-
+def brent_pollard_rho_factorise(n, x0, m):
     x = x0
-    y = rho_function(x0) % n
-    p = extended_euclidean(x-y, n)[0]
-    # print(x, y, p)
-    while p == 1:
-        x = rho_function(x) % n
-        y = rho_function(rho_function(y)) % n
-        p = extended_euclidean(x-y, n)[0]
-        # print(x, y, p)
-    if p < n:
-        return p
-    else:
-        return False
+    y = x0
+    ys = 1
 
-def prime_factorise(val):
+    r = 1
+    q = 1
+
+    G = 1
+
+    while G == 1:
+        x = y
+
+        for i in range(r):
+            y = rho_function(y) % n
+        
+        k = 0
+        while k < r and G == 1:
+            ys = y
+            count = min(m, r-k)
+            for i in range(count):
+                y = rho_function(y) % n
+                q = (q * abs(x-y)) % n
+            G = extended_euclidean(q, n)[0]
+            k += m
+
+        r *= 2
+    
+    if G == n:
+        ys = rho_function(ys) % n
+        G = extended_euclidean(abs(x - ys), n)[0]
+        while G == 1:
+            ys = rho_function(ys) % n
+            G = extended_euclidean(abs(x - ys), n)[0]
+    
+    if G == n:
+        return False
+    else:
+        return G
+
+def prime_factorise(val, m):
     factors = []
     n = val
     while n > 1:
@@ -89,13 +107,11 @@ def prime_factorise(val):
         # Repeatedly find factors of factors until a prime factor is found
         while primality_test(prime_factor, 4) == False:
             factor = prime_factor
-            prime_factor = pollard_rho_factorise(factor, np.random.randint(1, factor))
+            prime_factor = brent_pollard_rho_factorise(factor, np.random.randint(1, factor), m)
 
             # Repeat with a different x0 if Pollard Rho fails
             while prime_factor == False:
-                prime_factor = pollard_rho_factorise(factor, np.random.randint(1, factor))
-        
-        # print(prime_factor)
+                prime_factor = brent_pollard_rho_factorise(factor, np.random.randint(1, factor), m)
 
         # Calculate the power factor
         prev_power = 0
@@ -109,16 +125,10 @@ def prime_factorise(val):
         # Amend the list of power factors
         factors.append((prime_factor, prev_power))
         n = n // prev_power_factor
-
-        # print(factors)
-        # print(n)
     
     return factors
 
 def shank_discrete_log(p, g, A, cardinality):
-
-    # for i in range(cardinality):
-    #     print(repeated_squaring(g,i,p))
     
     # If the size is 2 then the sqrt rounds to 2 which messes up the modulo calculations
     if cardinality == 2:
@@ -127,24 +137,25 @@ def shank_discrete_log(p, g, A, cardinality):
         else:
             return 1
 
-    m = math.ceil(math.sqrt(cardinality))
     target = A
-    # print(m)
+
+    # Cardinality is used since the sub-group has lower cardinality but the order is the same
+    m = math.ceil(math.sqrt(cardinality))
+
+    # Dictionary holding {value:power of the generator to attain this value}
     big_steps = {1:0}
 
     val = 1
+    # A big step in the sub-group
     step = repeated_squaring(g, m, p)
 
-    # print(step)
-
+    # Compute all the big steps
     for i in range(1, m):
         val = (val * step) % p
         big_steps[val] = i*m
     
-    # print(big_steps)
-    
+    # Compute all the small steps
     for i in range(m):
-        # print(A)
         if target in big_steps:
             return (big_steps[target] - i) % (p-1)
         target = (target * g) % p
@@ -171,7 +182,7 @@ def ElGamalDecrypt(p, a, y1, y2):
 def DiscreteLog(p, g, A):
 
     # Use Silver-Pholig-Hellman to split it into several smaller discrete log instances
-    factors = prime_factorise(p-1)
+    factors = prime_factorise(p-1, 800)
 
     print(factors)
 
@@ -204,7 +215,6 @@ def DiscreteLog(p, g, A):
 
             # Solve the smaller discrete log instance
             coefficient = shank_discrete_log(p, generator, instance_beta, factor)
-            # print(coefficient)
             coefficient_result = coefficient * factor_power
 
             # Update variables
@@ -225,23 +235,6 @@ def ElGamalCrack(p, g, A, y1, y2):
     pass
 
 
-# print(DiffieHellman(9, 13, 17))
-# print(extended_euclidean(56, 15))
-
-# a = 17
-# A = repeated_squaring(2, 17, 17)
-
-# e = ElGamalEncrypt(17, 2, A, 7)
-# print(e)
-# # print(repeated_squaring(e[0], a, 17))
-# # print(extended_euclidean(16, 17)[1] % 17)
-# print(ElGamalDecrypt(17, 17, e[0], e[1]))
-
-# print(pollard_rho(52, np.random.randint(1, 52)))
-# print(primality_test(39, 4))
-# print(primality_test(35, 4))
-# print(prime_factorise(756329432))
-
 def find_generator(p):
     factors = prime_factorise(p-1)
     found = True
@@ -260,21 +253,46 @@ def find_generator(p):
             found = True
     return False
 
-
-
 g = 12
-a = 20089
+a = 103423
 p = 104729
 A = repeated_squaring(g,a,p)
-# print(A)
-# A = 75812
-
-# g = 3
-# a = 11
-# p = 17
-# A = repeated_squaring(g,a,p)
 
 # print(find_generator(p))
 
 # print(shank_discrete_log(p,g,A,p))
 print(DiscreteLog(p, g, A))
+
+
+
+## PROFILING ##
+
+# trials = 10000
+# tot = 0
+
+# for i in range(trials):
+#     start = time.time()
+#     prime_factorise(np.random.randint(100, 100000000), 800)
+#     end = time.time()
+#     tot += end - start
+# print(tot/trials)
+
+
+# trials = 100
+# min_m = 1
+# min_time = 100000
+
+# for m in range(500,1001):
+#     tot = 0
+
+#     for i in range(trials):
+#         start = time.time()
+#         brent_prime_factorise(np.random.randint(100, 100000000), m)
+#         # prime_factorise(104728)
+#         end = time.time()
+#         tot += end - start
+#     if tot/trials < min_time:
+#         min_time = tot/trials
+#         min_m = m
+# print(min_time)
+# print(min_m)
