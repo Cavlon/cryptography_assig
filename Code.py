@@ -160,6 +160,67 @@ def shank_discrete_log(p, g, A, cardinality):
             return (big_steps[target] - i) % (p-1)
         target = (target * g) % p
 
+def discrete_log_rho_function(x, s, t, p, g, A, partition):
+    region = x // partition
+    if region == 0:
+        return (A*x) % p, s, (t+1) % (p-1)
+    elif region == 1:
+        return (x*x) % p, (2*s) % (p-1), (2*t) % (p-1)
+    else:
+        return (g*x) % p, (s+1) % (p-1), t
+
+def pollard_rho_discrete_log(p, g, A, partition):
+    x, s, t = 1, 0, 0
+
+    factor = brent_pollard_rho_factorise(p-1, np.random.randint(1, p-1), 800)
+
+    # Repeat with a different x0 if Pollard Rho fails
+    while factor == False:
+        factor = brent_pollard_rho_factorise(p-1, np.random.randint(1, p-1), 800)
+    
+    if factor > math.sqrt(p-1):
+        factor = (p-1) // factor
+    
+    Q = repeated_squaring(A, factor, p)
+    R = repeated_squaring(g, factor, p)
+
+    x2, s2, t2 = discrete_log_rho_function(x, s, t, p, R, Q, partition)
+
+    # print(f"x = {x}, x2 = {x2}")
+
+    # Collision search
+    while x != x2:
+        x, s, t = discrete_log_rho_function(x, s, t, p, R, Q, partition)
+        x2, s2, t2 = discrete_log_rho_function(*discrete_log_rho_function(x2, s2, t2, p, R, Q, partition), p, R, Q, partition)
+        # print(f"x = {x}, x2 = {x2}")
+
+    # print(f"x = {x}, x2 = {x2}")
+    # print(f"s = {s}, t = {t}, s2 = {s2}, t2 = {t2}")
+
+    m = (t - t2) % (p-1)
+    n = (s2 - s) % (p-1)
+    m *= factor
+    n *= factor
+    d, l, _ = extended_euclidean(m, p-1)
+
+    # Check if an inverse can be calculated
+    if d == 1:
+        return (n * l) % (p-1)
+    else:
+        # Calculate the discrete log using roots of unity
+
+        n = (l*n) % (p-1)
+        k = n//d
+        theta_power = (p-1)//d
+
+        # print(f"d = {d}, n = {n}, l = {l}, k = {k}, theta = {theta_power}")
+
+        # Iterate through each root until the correct power is found
+        for i in range(d):
+            power = (theta_power * i) % (p-1)
+            power = (power + k) % (p-1)
+            if A == repeated_squaring(g, power, p):
+                return power
 
 
 def DiffieHellman(p, g, B):
@@ -184,7 +245,7 @@ def DiscreteLog(p, g, A):
     # Use Silver-Pholig-Hellman to split it into several smaller discrete log instances
     factors = prime_factorise(p-1, 800)
 
-    print(factors)
+    # print(factors)
 
     # The final result of the discrete log
     res = 0
@@ -214,7 +275,10 @@ def DiscreteLog(p, g, A):
             instance_beta = repeated_squaring(beta, power, p)
 
             # Solve the smaller discrete log instance
-            coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+            if factor < 1000:
+                coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+            else:
+                coefficient = pollard_rho_discrete_log(p, generator, instance_beta, p//3)
             coefficient_result = coefficient * factor_power
 
             # Update variables
@@ -236,7 +300,7 @@ def ElGamalCrack(p, g, A, y1, y2):
 
 
 def find_generator(p):
-    factors = prime_factorise(p-1)
+    factors = prime_factorise(p-1, 800)
     found = True
 
     for i in range(1, p):
@@ -253,29 +317,36 @@ def find_generator(p):
             found = True
     return False
 
-g = 12
-a = 103423
-p = 104729
+g = 7
+a = 178162
+p = 999959
 A = repeated_squaring(g,a,p)
+print(f"A = {A}")
 
 # print(find_generator(p))
 
 # print(shank_discrete_log(p,g,A,p))
-print(DiscreteLog(p, g, A))
+# print(pollard_rho_discrete_log(p, g, A, p//3))
+# print(DiscreteLog(p, g, A))
 
-
+# print(extended_euclidean(6,16))
 
 ## PROFILING ##
 
-# trials = 10000
-# tot = 0
+trials = 10000
+tot = 0
 
-# for i in range(trials):
-#     start = time.time()
-#     prime_factorise(np.random.randint(100, 100000000), 800)
-#     end = time.time()
-#     tot += end - start
-# print(tot/trials)
+for i in range(trials):
+    # print(i)
+    start = time.time()
+    # shank_discrete_log(p, g, A, p)
+    # brent_pollard_rho_discrete_log(p,g,A,p//3)
+    pollard_rho_discrete_log(p,g,A,p//3)
+    # DiscreteLog(p,g,A)
+    end = time.time()
+    tot += end - start
+print(tot/trials)
+print(pollard_rho_discrete_log(p,g,A,p//3))
 
 
 # trials = 100
