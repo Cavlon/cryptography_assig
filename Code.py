@@ -3,19 +3,21 @@ import math
 import time
 
 def repeated_squaring(generator, target_exponent, modulo):
+    power = target_exponent
     current_exponentiation = generator
     result = 1
 
     # The binary of the exponent shows which powers of 2 should be included in the result
-    binary = bin(target_exponent)[2:][::-1]
+    binary = bin(target_exponent)
 
-    for i in range(len(binary)):
+    for i in range(len(binary)-2):
         # Only include the required powers
-        if binary[i] == '1':
+        if power % 2 == 1:
             result = (result * current_exponentiation) % modulo
         
         # Repeatedly square
         current_exponentiation = (current_exponentiation * current_exponentiation) % modulo
+        power = power >> 1
     
     return result
 
@@ -129,13 +131,6 @@ def prime_factorise(val, m):
     return factors
 
 def shank_discrete_log(p, g, A, cardinality):
-    
-    # If the size is 2 then the sqrt rounds to 2 which messes up the modulo calculations
-    if cardinality == 2:
-        if A == 1:
-            return 0
-        else:
-            return 1
 
     target = A
 
@@ -160,67 +155,66 @@ def shank_discrete_log(p, g, A, cardinality):
             return (big_steps[target] - i) % (p-1)
         target = (target * g) % p
 
-def discrete_log_rho_function(x, s, t, p, g, A, partition):
+def discrete_log_rho_function(x, s, t, p, g, A, partition, cardinality):
     region = x // partition
     if region == 0:
-        return (A*x) % p, s, (t+1) % (p-1)
+        return (A*x) % p, s, (t+1) % cardinality
     elif region == 1:
-        return (x*x) % p, (2*s) % (p-1), (2*t) % (p-1)
+        return (x*x) % p, (2*s) % cardinality, (2*t) % cardinality
     else:
-        return (g*x) % p, (s+1) % (p-1), t
+        return (g*x) % p, (s+1) % cardinality, t
 
-def pollard_rho_discrete_log(p, g, A, partition):
-    x, s, t = 1, 0, 0
+def pollard_rho_generate_result(x, s, t, sequence_dict, cardinality, p, g, A):
 
-    factor = brent_pollard_rho_factorise(p-1, np.random.randint(1, p-1), 800)
+    m = (sequence_dict[x][1] - t) % cardinality
+    n = (s - sequence_dict[x][0]) % cardinality
+    d, l, _ = extended_euclidean(m, cardinality)
 
-    # Repeat with a different x0 if Pollard Rho fails
-    while factor == False:
-        factor = brent_pollard_rho_factorise(p-1, np.random.randint(1, p-1), 800)
-    
-    if factor > math.sqrt(p-1):
-        factor = (p-1) // factor
-    
-    Q = repeated_squaring(A, factor, p)
-    R = repeated_squaring(g, factor, p)
-
-    x2, s2, t2 = discrete_log_rho_function(x, s, t, p, R, Q, partition)
-
-    # print(f"x = {x}, x2 = {x2}")
-
-    # Collision search
-    while x != x2:
-        x, s, t = discrete_log_rho_function(x, s, t, p, R, Q, partition)
-        x2, s2, t2 = discrete_log_rho_function(*discrete_log_rho_function(x2, s2, t2, p, R, Q, partition), p, R, Q, partition)
-        # print(f"x = {x}, x2 = {x2}")
-
-    # print(f"x = {x}, x2 = {x2}")
-    # print(f"s = {s}, t = {t}, s2 = {s2}, t2 = {t2}")
-
-    m = (t - t2) % (p-1)
-    n = (s2 - s) % (p-1)
-    m *= factor
-    n *= factor
-    d, l, _ = extended_euclidean(m, p-1)
+    # print(f"m = {m}, n = {n}, d = {d}, l = {l}")
 
     # Check if an inverse can be calculated
     if d == 1:
-        return (n * l) % (p-1)
+        return (n * l) % cardinality
     else:
         # Calculate the discrete log using roots of unity
 
-        n = (l*n) % (p-1)
+        n = (l*n) % cardinality
         k = n//d
-        theta_power = (p-1)//d
+        theta_power = cardinality//d
 
         # print(f"d = {d}, n = {n}, l = {l}, k = {k}, theta = {theta_power}")
 
         # Iterate through each root until the correct power is found
         for i in range(d):
-            power = (theta_power * i) % (p-1)
-            power = (power + k) % (p-1)
+            power = (theta_power * i + k) % cardinality
             if A == repeated_squaring(g, power, p):
                 return power
+
+def pollard_rho_collision_search(R, Q, partition, p, cardinality):
+    sequence_dict = {1:(0, 0)}
+
+    x, s, t = discrete_log_rho_function(1, 0, 0, p, R, Q, partition, cardinality)
+
+    # Collision search
+    while x not in sequence_dict:
+        sequence_dict[x] = (s, t)
+        x, s, t = discrete_log_rho_function(x, s, t, p, R, Q, partition, cardinality)
+    
+    # print(f"x = {x}")
+    # print(f"s = {sequence_dict[x][0]}, t = {sequence_dict[x][1]}, s2 = {s}, t2 = {t}")
+
+    return x, s, t, sequence_dict
+
+def pollard_rho_discrete_log(p, g, A, partition, cardinality):
+    # print(p, g, A)
+    # p_minus_1 = p-1
+
+    x, s, t, sequence_dict = pollard_rho_collision_search(g, A, partition, p, cardinality)
+
+    # print(f"x = {x}, x2 = {x2}")
+    # print(f"s = {s}, t = {t}, s2 = {s2}, t2 = {t2}")
+
+    return pollard_rho_generate_result(x, s, t, sequence_dict, cardinality, p, g, A)
 
 
 def DiffieHellman(p, g, B):
@@ -260,6 +254,8 @@ def DiscreteLog(p, g, A):
         generator = repeated_squaring(g, power // factor, p)
         generator_inverse = extended_euclidean(g, p)[1] % p
 
+        # print(f"gener = {generator}, inve = {generator_inverse}")
+
         # The value being logged at each iteration
         beta = A
 
@@ -274,11 +270,18 @@ def DiscreteLog(p, g, A):
             # Initialise the beta
             instance_beta = repeated_squaring(beta, power, p)
 
-            # Solve the smaller discrete log instance
-            if factor < 1000:
-                coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+            # If the size is 2 then the sqrt rounds to 2 which messes up the modulo calculations
+            if factor == 2:
+                if instance_beta == 1:
+                    coefficient = 0
+                else:
+                    coefficient = 1
             else:
-                coefficient = pollard_rho_discrete_log(p, generator, instance_beta, p//3)
+
+                # Solve the smaller discrete log instance
+                # coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+                coefficient = pollard_rho_discrete_log(p, generator, instance_beta, p//3, factor)
+            # print(f"coefficient = {coefficient}")
             coefficient_result = coefficient * factor_power
 
             # Update variables
@@ -341,12 +344,16 @@ for i in range(trials):
     start = time.time()
     # shank_discrete_log(p, g, A, p)
     # brent_pollard_rho_discrete_log(p,g,A,p//3)
-    pollard_rho_discrete_log(p,g,A,p//3)
-    # DiscreteLog(p,g,A)
+    # pollard_rho_discrete_log(p,g,A,p//3)
+    DiscreteLog(p,g,A)
     end = time.time()
     tot += end - start
 print(tot/trials)
-print(pollard_rho_discrete_log(p,g,A,p//3))
+# print(pollard_rho_discrete_log(p,g,A,p//3))
+# print(pollard_rho_discrete_log(p,49,9,p//3, (p-1)//2))
+# print(pollard_rho_discrete_log(7,2,4,p//3, (7-1)//2))
+# print(shank_discrete_log(p, 49, 9, (p-1)//2))
+print(DiscreteLog(p, g, A))
 
 
 # trials = 100
