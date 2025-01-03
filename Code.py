@@ -46,13 +46,20 @@ def primality_test(n, k):
     for i in range(k):
         a = np.random.randint(2, n-1)
         x = repeated_squaring(a, d, n)
-        y = 1
-        for j in range(s):
-            y = (x * x) % n
-            if y == 1 and x != 1 and x != n-1:
-                return False
-            x = y
-        if y != 1:
+        if x == 1 or x == n - 1:
+            continue
+
+        for i in range(s - 1):
+
+            x = (x * x) % n
+
+            if x == 1:
+                return False 
+            
+            if x == n - 1:
+                break
+        
+        if x != n - 1:
             return False
     return True
 
@@ -100,14 +107,28 @@ def brent_pollard_rho_factorise(n, x0, m):
         return G
 
 def prime_factorise(val, m):
+    small_primes = [2, 3, 5, 7, 11, 13, 17]
     factors = []
     n = val
+
+    # Try some small primes first
+    for prime in small_primes:
+        if n % prime == 0:
+            power = 0
+
+            while n % prime == 0:
+                n = n // prime
+                power += 1
+            
+            factors.append((prime, power))
+
+    # Repeatedly find prime factors until they are all found
     while n > 1:
 
         prime_factor = n
 
         # Repeatedly find factors of factors until a prime factor is found
-        while primality_test(prime_factor, 4) == False:
+        while primality_test(prime_factor, 2) == False:
             factor = prime_factor
             prime_factor = brent_pollard_rho_factorise(factor, np.random.randint(1, factor), m)
 
@@ -116,17 +137,13 @@ def prime_factorise(val, m):
                 prime_factor = brent_pollard_rho_factorise(factor, np.random.randint(1, factor), m)
 
         # Calculate the power factor
-        prev_power = 0
-        prev_power_factor = 1
-        power_factor = prime_factor
-        while n % power_factor == 0:
-            prev_power += 1
-            prev_power_factor = power_factor
-            power_factor *= prime_factor
+        power = 0
+        while n % prime_factor == 0:
+            n = n // prime_factor
+            power += 1
         
         # Amend the list of power factors
-        factors.append((prime_factor, prev_power))
-        n = n // prev_power_factor
+        factors.append((prime_factor, power))
     
     return factors
 
@@ -155,70 +172,9 @@ def shank_discrete_log(p, g, A, cardinality):
             return (big_steps[target] - i) % (p-1)
         target = (target * g) % p
 
-def discrete_log_rho_function(x, s, t, p, g, A, partition, cardinality):
-    region = x // partition
-    if region == 0:
-        return (A*x) % p, s, (t+1) % cardinality
-    elif region == 1:
-        return (x*x) % p, (2*s) % cardinality, (2*t) % cardinality
-    else:
-        return (g*x) % p, (s+1) % cardinality, t
-
-def pollard_rho_generate_result(x, s, t, sequence_dict, cardinality, p, g, A):
-
-    m = (sequence_dict[x][1] - t) % cardinality
-    n = (s - sequence_dict[x][0]) % cardinality
-    d, l, _ = extended_euclidean(m, cardinality)
-
-    # print(f"m = {m}, n = {n}, d = {d}, l = {l}")
-
-    # Check if an inverse can be calculated
-    if d == 1:
-        return (n * l) % cardinality
-    else:
-        # Calculate the discrete log using roots of unity
-
-        n = (l*n) % cardinality
-        k = n//d
-        theta_power = cardinality//d
-
-        # print(f"d = {d}, n = {n}, l = {l}, k = {k}, theta = {theta_power}")
-
-        # Iterate through each root until the correct power is found
-        for i in range(d):
-            power = (theta_power * i + k) % cardinality
-            if A == repeated_squaring(g, power, p):
-                return power
-
-def pollard_rho_collision_search(R, Q, partition, p, cardinality):
-    sequence_dict = {1:(0, 0)}
-
-    x, s, t = discrete_log_rho_function(1, 0, 0, p, R, Q, partition, cardinality)
-
-    # Collision search
-    while x not in sequence_dict:
-        sequence_dict[x] = (s, t)
-        x, s, t = discrete_log_rho_function(x, s, t, p, R, Q, partition, cardinality)
-    
-    # print(f"x = {x}")
-    # print(f"s = {sequence_dict[x][0]}, t = {sequence_dict[x][1]}, s2 = {s}, t2 = {t}")
-
-    return x, s, t, sequence_dict
-
-def pollard_rho_discrete_log(p, g, A, partition, cardinality):
-    # print(p, g, A)
-    # p_minus_1 = p-1
-
-    x, s, t, sequence_dict = pollard_rho_collision_search(g, A, partition, p, cardinality)
-
-    # print(f"x = {x}, x2 = {x2}")
-    # print(f"s = {s}, t = {t}, s2 = {s2}, t2 = {t2}")
-
-    return pollard_rho_generate_result(x, s, t, sequence_dict, cardinality, p, g, A)
-
-
 def DiffieHellman(p, g, B):
     a = np.random.randint(2, p-2)
+    print(a)
     A = repeated_squaring(g, a, p)
     K = repeated_squaring(B, a, p)
     return A, K
@@ -279,9 +235,8 @@ def DiscreteLog(p, g, A):
             else:
 
                 # Solve the smaller discrete log instance
-                # coefficient = shank_discrete_log(p, generator, instance_beta, factor)
-                coefficient = pollard_rho_discrete_log(p, generator, instance_beta, p//3, factor)
-            # print(f"coefficient = {coefficient}")
+                coefficient = shank_discrete_log(p, generator, instance_beta, factor)
+
             coefficient_result = coefficient * factor_power
 
             # Update variables
@@ -296,10 +251,14 @@ def DiscreteLog(p, g, A):
     return res
 
 def DiffieHellmanCrack(p, g, A, B):
-    pass
+    a = DiscreteLog(p, g, A)
+    return repeated_squaring(B, a, p)
 
 def ElGamalCrack(p, g, A, y1, y2):
-    pass
+    a = DiscreteLog(p, g, A)
+    power = repeated_squaring(y1, a, p)
+    inverse = extended_euclidean(power, p)[1] % p
+    return (y2 * inverse) % p
 
 
 def find_generator(p):
@@ -320,11 +279,11 @@ def find_generator(p):
             found = True
     return False
 
-g = 7
-a = 178162
-p = 999959
-A = repeated_squaring(g,a,p)
-print(f"A = {A}")
+# g = 7
+# a = 178162
+# p = 999959
+# A = repeated_squaring(g,a,p)
+# print(f"A = {A}")
 
 # print(find_generator(p))
 
@@ -341,19 +300,25 @@ tot = 0
 
 for i in range(trials):
     # print(i)
+    # a = np.random.randint(1,p)
+    # A = repeated_squaring(g,a,p)
+    value = np.random.randint(100, 100000000)
     start = time.time()
-    # shank_discrete_log(p, g, A, p)
+    # res = shank_discrete_log(p, g, A, p)
     # brent_pollard_rho_discrete_log(p,g,A,p//3)
     # pollard_rho_discrete_log(p,g,A,p//3)
-    DiscreteLog(p,g,A)
+    brent_pollard_rho_factorise(value, np.random.randint(1, value), 800)
+    # res = DiscreteLog(p,g,A)
     end = time.time()
+    # if a != res:
+    #     print("incorrect")
     tot += end - start
 print(tot/trials)
 # print(pollard_rho_discrete_log(p,g,A,p//3))
 # print(pollard_rho_discrete_log(p,49,9,p//3, (p-1)//2))
 # print(pollard_rho_discrete_log(7,2,4,p//3, (7-1)//2))
 # print(shank_discrete_log(p, 49, 9, (p-1)//2))
-print(DiscreteLog(p, g, A))
+# print(DiscreteLog(p, g, A))
 
 
 # trials = 100
